@@ -1,0 +1,62 @@
+name: Build and Deploy Frontend
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+env:
+  PROJECT_ID: verikyc-dev
+  REGION: us-central1
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set environment
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "ENV=prod" >> $GITHUB_ENV
+            echo "BUCKET=verikyc-frontend-prod" >> $GITHUB_ENV
+          else
+            echo "ENV=dev" >> $GITHUB_ENV
+            echo "BUCKET=verikyc-frontend-dev" >> $GITHUB_ENV
+          fi
+
+      - name: Authenticate to GCP via WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+
+      - name: Deploy to GCS
+        run: |
+          gsutil -m rsync -r -d dist/ gs://${{ env.BUCKET }}/
+          gsutil -m setmeta -h "Cache-Control:no-cache, no-store" gs://${{ env.BUCKET }}/index.html
